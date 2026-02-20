@@ -1,14 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
-import { logChatbotQuestion } from '../utils/api';
+import { logChatbotQuestion, askChatbot } from '../utils/api';
 
-const Chatbot = () => {
+const Chatbot = ({ examId: propExamId = null, userId: propUserId = null }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState([
     { id: 1, text: "👋 Hello! I'm your Exam Assistant.\n\nI can help you with:\n\n📝 Starting your exam\n📋 Proctoring rules\n⚠️ Violation consequences\n💻 Coding section help\n🔲 Fullscreen requirements\n\nWhat would you like to know?", sender: 'bot' }
   ]);
   const [inputValue, setInputValue] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const [isSupported, setIsSupported] = useState(true);
+  const [currentExamId, setCurrentExamId] = useState(propExamId);
+  const [currentUserId, setCurrentUserId] = useState(propUserId);
   const messagesEndRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   const toggleChat = () => setIsOpen(!isOpen);
 
@@ -25,7 +30,106 @@ const Chatbot = () => {
     scrollToBottom();
   }, [messages, isOpen]);
 
-  const handleSendMessage = () => {
+  // Detect exam context from URL or props
+  useEffect(() => {
+    // Priority: props > localStorage > URL
+    if (propExamId) {
+      setCurrentExamId(propExamId);
+    } else if (propUserId) {
+      setCurrentUserId(propUserId);
+    } else {
+      // Check URL for exam ID (e.g., /exam/123)
+      const path = window.location.pathname;
+      const examMatch = path.match(/\/exam\/([^/]+)/);
+      if (examMatch && examMatch[1]) {
+        setCurrentExamId(examMatch[1]);
+      }
+      
+      // Check localStorage for user context
+      const token = localStorage.getItem('token');
+      const user = localStorage.getItem('user');
+      if (user) {
+        try {
+          const userData = JSON.parse(user);
+          if (userData._id) {
+            setCurrentUserId(userData._id);
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+      
+      // Check localStorage for current exam
+      const currentExam = localStorage.getItem('currentExamId');
+      if (currentExam) {
+        setCurrentExamId(currentExam);
+      }
+    }
+  }, [propExamId, propUserId]);
+
+  // Initialize Speech Recognition
+  useEffect(() => {
+    // Check if Speech Recognition is supported
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      setIsSupported(false);
+      return;
+    }
+
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.continuous = false;
+    recognitionRef.current.interimResults = true;
+    recognitionRef.current.lang = 'en-US';
+
+    recognitionRef.current.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognitionRef.current.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map(result => result[0])
+        .map(result => result.transcript)
+        .join('');
+      
+      setInputValue(transcript);
+    };
+
+    recognitionRef.current.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      setIsListening(false);
+      
+      if (event.error === 'not-allowed') {
+        alert('Microphone access denied. Please allow microphone access to use voice input.');
+      }
+    };
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
+
+  const toggleVoiceInput = () => {
+    if (!isSupported) {
+      alert('Voice input is not supported in your browser. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+    } else {
+      setInputValue('');
+      recognitionRef.current.start();
+    }
+  };
+
+  const handleSendMessage = async () => {
     if (inputValue.trim() === '') return;
 
     const userMessage = {
@@ -37,38 +141,69 @@ const Chatbot = () => {
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
 
-    // Get bot response
-    const botResponseText = getBotResponse(inputValue);
-    
-    // Log the question to backend (non-blocking - fire and forget)
-    const questionText = inputValue;
-    const timestamp = new Date().toISOString();
-    
-    // Use try/catch to prevent blocking UI if request fails
-    try {
-      // Fire and forget - don't await the response
-      logChatbotQuestion({
-        question: questionText,
-        timestamp: timestamp,
-        botResponse: botResponseText
-      }).catch(() => {
-        // Silently fail - don't block UI
-        console.debug('Chatbot logging failed - continuing without logging');
-      });
-    } catch (error) {
-      // Silently handle any errors
-      console.debug('Chatbot logging error - continuing without logging');
-    }
+    // Show typing indicator
+    const typingMessage = {
+      id: Date.now() + 1,
+      text: '...',
+      sender: 'bot',
+      isTyping: true
+    };
+    setMessages(prev => [...prev, typingMessage]);
 
-    // Simulate bot response
-    setTimeout(() => {
-      const botResponse = {
-        id: Date.now() + 1,
-        text: botResponseText,
+    try {
+      // Call the OpenAI API
+      const response = await askChatbot({
+        question: inputValue,
+        examId: currentExamId,
+        userId: currentUserId
+      });
+
+      // Remove typing indicator
+      setMessages(prev => prev.filter(msg => !msg.isTyping));
+
+      if (response.success && response.data?.response) {
+        const botResponse = {
+          id: Date.now() + 2,
+          text: response.data.response,
+          sender: 'bot'
+        };
+        setMessages(prev => [...prev, botResponse]);
+
+        // Log the question to backend (non-blocking)
+        logChatbotQuestion({
+          question: inputValue,
+          timestamp: new Date().toISOString(),
+          botResponse: response.data.response,
+          examId: currentExamId,
+          userId: currentUserId
+        }).catch(() => {
+          console.debug('Chatbot logging failed - continuing without logging');
+        });
+      } else {
+        // Handle API error response - use fallback rule-based response
+        const fallbackResponse = getBotResponse(inputValue);
+        const errorResponse = {
+          id: Date.now() + 2,
+          text: fallbackResponse,
+          sender: 'bot'
+        };
+        setMessages(prev => [...prev, errorResponse]);
+      }
+    } catch (error) {
+      // Remove typing indicator
+      setMessages(prev => prev.filter(msg => !msg.isTyping));
+
+      console.error('Chatbot error:', error);
+
+      // Use fallback rule-based response when API fails
+      const fallbackResponse = getBotResponse(inputValue);
+      const errorResponse = {
+        id: Date.now() + 2,
+        text: fallbackResponse,
         sender: 'bot'
       };
-      setMessages(prev => [...prev, botResponse]);
-    }, 500);
+      setMessages(prev => [...prev, errorResponse]);
+    }
   };
 
   // Rule-based responses object mapping keywords to replies
@@ -229,7 +364,15 @@ const Chatbot = () => {
                       : 'bg-white text-gray-800 border border-gray-200'
                   }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                  {message.isTyping ? (
+                    <div className="flex items-center gap-1">
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                    </div>
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                  )}
                 </div>
               </div>
             ))}
@@ -244,9 +387,34 @@ const Chatbot = () => {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Type your message..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                placeholder={isListening ? "Listening..." : "Type your message..."}
+                className={`flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm ${isListening ? 'border-red-400 ring-2 ring-red-200' : ''}`}
               />
+              {/* Voice Input Button */}
+              <button
+                onClick={toggleVoiceInput}
+                className={`px-3 py-2 rounded-lg transition-colors duration-200 flex items-center justify-center ${isListening 
+                  ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' 
+                  : isSupported 
+                    ? 'bg-gray-200 hover:bg-gray-300 text-gray-700' 
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}
+                aria-label={isListening ? "Stop listening" : "Start voice input"}
+                disabled={!isSupported}
+                title={isSupported ? (isListening ? "Stop recording" : "Voice input") : "Voice input not supported"}
+              >
+                {isListening ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                )}
+              </button>
+              {/* Send Button */}
               <button
                 onClick={handleSendMessage}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors duration-200 flex items-center justify-center"

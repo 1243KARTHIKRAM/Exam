@@ -156,6 +156,13 @@ export default function ExamPage() {
     };
   }, [submitted, requestFullscreen, handleFullscreenChange, handleVisibilityChange, handleContextMenu, handleCopy, handlePaste, handleCut, handleKeyDown]);
 
+  // Cleanup: Clear exam ID from localStorage when leaving exam page
+  useEffect(() => {
+    return () => {
+      localStorage.removeItem('currentExamId');
+    };
+  }, []);
+
   const initializeFaceDetection = useCallback(async () => {
     const { FaceDetection } = await import('@mediapipe/face_detection');
     const faceDetection = new FaceDetection({
@@ -346,6 +353,9 @@ export default function ExamPage() {
       const data = await getExamById(id, token);
       if (data.exam) {
         setExam(data.exam);
+        
+        // Store exam ID in localStorage for chatbot analytics
+        localStorage.setItem('currentExamId', data.exam._id);
         
         // Process MCQ questions - add questionType
         const mcqQuestions = (data.mcqQuestions || []).map(q => ({

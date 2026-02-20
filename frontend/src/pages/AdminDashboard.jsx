@@ -10,6 +10,7 @@ import {
   detectPlagiarism,
   getPlagiarismStats
 } from '../utils/api';
+import ChatbotAnalytics from '../components/ChatbotAnalytics';
 
 function AdminDashboard() {
   const navigate = useNavigate();
@@ -187,7 +188,7 @@ function AdminDashboard() {
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4">
           <nav className="flex space-x-8">
-            {['overview', 'attempts', 'violations', 'students', 'plagiarism'].map((tab) => (
+            {['overview', 'attempts', 'violations', 'students', 'plagiarism', 'chatbot'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -711,6 +712,19 @@ function AdminDashboard() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Chatbot Analytics Tab */}
+        {activeTab === 'chatbot' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-bold mb-2">Chatbot Analytics</h2>
+              <p className="text-gray-600 mb-6">
+                Analyze chatbot usage patterns to understand student questions and confusion topics.
+              </p>
+              <ChatbotAnalytics token={token} />
+            </div>
           </div>
         )}
       </main>

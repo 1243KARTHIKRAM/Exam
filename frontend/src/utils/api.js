@@ -308,6 +308,16 @@ export async function logChatbotQuestion(data) {
   return res.json();
 }
 
+// Ask chatbot a question using OpenAI AI
+export async function askChatbot(data) {
+  const res = await fetch(`${API_URL}/api/chatbot/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
 // Get chatbot logs for admin analytics
 export async function getChatbotLogs(params = {}, token) {
   const queryString = new URLSearchParams(params).toString();
