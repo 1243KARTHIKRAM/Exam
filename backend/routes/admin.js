@@ -6,7 +6,10 @@ const {
   getStudentViolations,
   getExamStats,
   getDashboardStats,
-  getAllStudents
+  getAllStudents,
+  detectPlagiarism,
+  getPlagiarismStatsOverall,
+  compareSubmissions
 } = require('../controllers/adminController');
 
 // All admin routes require authentication and admin role
@@ -27,5 +30,10 @@ router.get('/students', getAllStudents);
 
 // Get student violations
 router.get('/student/:studentId/violations', getStudentViolations);
+
+// Plagiarism detection routes
+router.get('/exam/:examId/plagiarism', detectPlagiarism);
+router.get('/plagiarism/stats', getPlagiarismStatsOverall);
+router.get('/submissions/:submissionId/compare/:otherSubmissionId', compareSubmissions);
 
 module.exports = router;

@@ -88,6 +88,37 @@ export async function submitViolation(examId, type, snapshot, token) {
   return res.json();
 }
 
+// Submit coding violation (paste, tab switch, fullscreen exit, etc.)
+export async function submitCodingViolation(examId, type, metadata = {}, token) {
+  const res = await fetch(`${API_URL}/api/violations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ 
+      examId, 
+      type, 
+      metadata,
+      description: getViolationDescription(type, metadata)
+    })
+  });
+  return res.json();
+}
+
+// Helper to generate description based on violation type
+function getViolationDescription(type, metadata) {
+  switch (type) {
+    case 'paste':
+      return `Pasted ${metadata.length || 0} characters into code editor`;
+    case 'tab_switch':
+      return `Switched away from exam tab - ${metadata.duration || 0}ms`;
+    case 'fullscreen_exit':
+      return 'Exited fullscreen mode during exam';
+    case 'copy_attempt':
+      return `Attempted to copy ${metadata.length || 0} characters`;
+    default:
+      return 'Coding integrity violation detected';
+  }
+}
+
 // Admin API endpoints
 
 // Get dashboard statistics
@@ -132,6 +163,91 @@ export async function getStudentViolations(studentId, examId, token) {
   if (examId) params.append('examId', examId);
   
   const res = await fetch(`${API_URL}/api/admin/student/${studentId}/violations?${params}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+// Coding Question API endpoints
+
+// Create a coding question (admin)
+export async function createCodingQuestion(data, token) {
+  const res = await fetch(`${API_URL}/api/code/questions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// Get all coding questions for an exam
+export async function getCodingQuestions(examId, token) {
+  const res = await fetch(`${API_URL}/api/code/questions/exam/${examId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+// Get a single coding question
+export async function getCodingQuestion(questionId, token) {
+  const res = await fetch(`${API_URL}/api/code/questions/${questionId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+// Run code (test with sample test cases only)
+export async function runCode(data, token) {
+  const res = await fetch(`${API_URL}/api/code/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// Submit code (run all test cases and save)
+export async function submitCode(data, token) {
+  const res = await fetch(`${API_URL}/api/code/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// Execute code (legacy - for backward compatibility)
+export async function executeCode(data, token) {
+  const res = await fetch(`${API_URL}/api/code/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// Get user's submissions for a question
+export async function getUserSubmissions(questionId, token) {
+  const res = await fetch(`${API_URL}/api/code/submissions/${questionId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+// Update a coding question (admin)
+export async function updateCodingQuestion(questionId, data, token) {
+  const res = await fetch(`${API_URL}/api/code/questions/${questionId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// Delete a coding question (admin)
+export async function deleteCodingQuestion(questionId, token) {
+  const res = await fetch(`${API_URL}/api/code/questions/${questionId}`, {
+    method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` }
   });
   return res.json();

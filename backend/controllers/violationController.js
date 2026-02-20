@@ -3,13 +3,42 @@ const Violation = require('../models/Violation');
 // Create a new violation
 exports.createViolation = async (req, res) => {
   try {
-    const { examId, type, snapshot } = req.body;
+    const { examId, type, snapshot, severity, description, metadata } = req.body;
     const userId = req.user.id; // From auth middleware
+
+    // Determine severity based on violation type if not provided
+    let violationSeverity = severity;
+    if (!violationSeverity) {
+      switch (type) {
+        case 'paste':
+        case 'copy_attempt':
+          violationSeverity = 'medium';
+          break;
+        case 'tab_switch':
+          violationSeverity = 'high';
+          break;
+        case 'fullscreen_exit':
+          violationSeverity = 'high';
+          break;
+        case 'multiple_faces':
+          violationSeverity = 'critical';
+          break;
+        case 'face_left':
+        case 'no_face':
+          violationSeverity = 'medium';
+          break;
+        default:
+          violationSeverity = 'low';
+      }
+    }
 
     const violation = new Violation({
       userId,
       examId,
       type,
+      severity: violationSeverity,
+      description: description || '',
+      metadata: metadata || {},
       snapshot
     });
 

@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { createViolation, getExamViolations, getUserViolations } = require('../controllers/violationController');
-const auth = require('../middleware/auth');
+const { protect } = require('../middleware/auth');
 
 // All routes require authentication
-router.use(auth);
+router.use(protect);
 
 // Create a violation
 router.post('/', createViolation);

@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import { ThemeProvider } from './context/ThemeContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -8,7 +9,7 @@ import AdminDashboard from './pages/AdminDashboard';
 
 function App() {
   return (
-    <div className="min-h-screen">
+    <ThemeProvider>
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -17,7 +18,7 @@ function App() {
         <Route path="/exam/:id" element={<ExamPage />} />
         <Route path="/admin-dashboard" element={<AdminDashboard />} />
       </Routes>
-    </div>
+    </ThemeProvider>
   );
 }
 
