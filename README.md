@@ -29,6 +29,11 @@ npm run dev           # starts nodemon server on http://localhost:5000
 ## API
 
 - `GET /api/test` – simple route returning `{ message: 'API is working' }`.
+- **Authentication**
+  - `POST /api/auth/register` – create account (name, email, password, role).
+  - `POST /api/auth/login` – authenticate and receive JWT token.
+  - protected endpoints use `Authorization: Bearer <token>` header.
+
 
 
 Feel free to extend with authentication, exam flows, proctoring logic, etc.
