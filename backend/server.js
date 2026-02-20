@@ -10,6 +10,7 @@ const examRoute = require('./routes/exams');
 const violationRoute = require('./routes/violations');
 const adminRoute = require('./routes/admin');
 const codingRoute = require('./routes/coding');
+const chatbotRoute = require('./routes/chatbot');
 const { addQuestion } = require('./controllers/questionController');
 const { protect, authorize } = require('./middleware/auth');
 
@@ -70,6 +71,7 @@ app.use('/api/exams', examRoute);
 app.use('/api/violations', violationRoute);
 app.use('/api/admin', adminRoute);
 app.use('/api/code', codingRoute);
+app.use('/api/chatbot', chatbotRoute);
 app.post('/api/questions/add', protect, authorize('admin'), addQuestion);
 app.use('/api/test', testRoute);
 

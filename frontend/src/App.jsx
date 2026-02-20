@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import ExamPage from './pages/ExamPage';
 import AdminDashboard from './pages/AdminDashboard';
+import Chatbot from './components/Chatbot';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
         <Route path="/exam/:id" element={<ExamPage />} />
         <Route path="/admin-dashboard" element={<AdminDashboard />} />
       </Routes>
+      <Chatbot />
     </ThemeProvider>
   );
 }

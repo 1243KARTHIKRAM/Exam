@@ -295,3 +295,33 @@ export async function compareSubmissions(submissionId, otherSubmissionId, token)
   });
   return res.json();
 }
+
+// ==================== CHATBOT LOGGING API ====================
+
+// Log a chatbot question (non-blocking - fire and forget)
+export async function logChatbotQuestion(data) {
+  const res = await fetch(`${API_URL}/api/chatbot/log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// Get chatbot logs for admin analytics
+export async function getChatbotLogs(params = {}, token) {
+  const queryString = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_URL}/api/chatbot/logs?${queryString}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+// Get chatbot analytics data
+export async function getChatbotAnalytics(params = {}, token) {
+  const queryString = new URLSearchParams(params).toString();
+  const res = await fetch(`${API_URL}/api/chatbot/analytics?${queryString}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
