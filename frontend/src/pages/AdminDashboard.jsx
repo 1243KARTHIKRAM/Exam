@@ -6,7 +6,9 @@ import {
   getExamAttempts, 
   getExamStats, 
   getStudents, 
-  getExams 
+  getExams,
+  detectPlagiarism,
+  getPlagiarismStats
 } from '../utils/api';
 
 function AdminDashboard() {
@@ -21,6 +23,13 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedAttempt, setSelectedAttempt] = useState(null);
   const [violations, setViolations] = useState([]);
+  
+  // Plagiarism detection state
+  const [plagiarismStats, setPlagiarismStats] = useState(null);
+  const [plagiarismLoading, setPlagiarismLoading] = useState(false);
+  const [plagiarismThreshold, setPlagiarismThreshold] = useState(80);
+  const [selectedPlagiarismExam, setSelectedPlagiarismExam] = useState('');
+  const [selectedPair, setSelectedPair] = useState(null);
 
   const token = localStorage.getItem('token');
   const userRole = localStorage.getItem('role');
@@ -178,7 +187,7 @@ function AdminDashboard() {
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4">
           <nav className="flex space-x-8">
-            {['overview', 'attempts', 'violations', 'students'].map((tab) => (
+            {['overview', 'attempts', 'violations', 'students', 'plagiarism'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -501,6 +510,207 @@ function AdminDashboard() {
                 <div className="text-center py-8 text-gray-500">No students found</div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Plagiarism Detection Tab */}
+        {activeTab === 'plagiarism' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-bold mb-4">Plagiarism Detection</h2>
+              <p className="text-gray-600 mb-4">
+                Analyze coding submissions to detect potential plagiarism using Levenshtein distance algorithm.
+              </p>
+              
+              {/* Exam Selection and Controls */}
+              <div className="flex flex-wrap gap-4 mb-6">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Exam</label>
+                  <select
+                    value={selectedPlagiarismExam}
+                    onChange={(e) => setSelectedPlagiarismExam(e.target.value)}
+                    className="w-full p-2 border rounded-lg"
+                  >
+                    <option value="">All Exams</option>
+                    {exams.map((exam) => (
+                      <option key={exam._id} value={exam._id}>
+                        {exam.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-40">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Threshold (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={plagiarismThreshold}
+                    onChange={(e) => setPlagiarismThreshold(Number(e.target.value))}
+                    className="w-full p-2 border rounded-lg"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={async () => {
+                      if (!selectedPlagiarismExam) {
+                        alert('Please select an exam first');
+                        return;
+                      }
+                      setPlagiarismLoading(true);
+                      try {
+                        const res = await detectPlagiarism(selectedPlagiarismExam, plagiarismThreshold, null, token);
+                        if (res.success) {
+                          setPlagiarismStats(res.stats);
+                        } else {
+                          alert(res.message || 'Failed to detect plagiarism');
+                        }
+                      } catch (error) {
+                        console.error('Error detecting plagiarism:', error);
+                        alert('Error detecting plagiarism');
+                      }
+                      setPlagiarismLoading(false);
+                    }}
+                    disabled={plagiarismLoading || !selectedPlagiarismExam}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400"
+                  >
+                    {plagiarismLoading ? 'Analyzing...' : 'Detect Plagiarism'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Statistics Overview */}
+              {plagiarismStats && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                  <div className="bg-blue-50 p-4 rounded-lg">
+                    <div className="text-sm text-blue-600">Total Submissions</div>
+                    <div className="text-2xl font-bold text-blue-800">{plagiarismStats.totalSubmissions}</div>
+                  </div>
+                  <div className="bg-purple-50 p-4 rounded-lg">
+                    <div className="text-sm text-purple-600">Comparisons Made</div>
+                    <div className="text-2xl font-bold text-purple-800">{plagiarismStats.totalComparisons}</div>
+                  </div>
+                  <div className="bg-red-50 p-4 rounded-lg">
+                    <div className="text-sm text-red-600">Suspicious Pairs</div>
+                    <div className="text-2xl font-bold text-red-800">{plagiarismStats.suspiciousPairs}</div>
+                  </div>
+                  <div className="bg-green-50 p-4 rounded-lg">
+                    <div className="text-sm text-green-600">Avg Similarity</div>
+                    <div className="text-2xl font-bold text-green-800">{plagiarismStats.averageSimilarity}%</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Suspicious Pairs Table */}
+              {plagiarismStats && plagiarismStats.pairs && plagiarismStats.pairs.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Similarity</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Student 1</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Student 2</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {plagiarismStats.pairs.map((pair, index) => (
+                        <tr key={index} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 rounded text-sm font-medium ${
+                              pair.similarity >= 90 ? 'bg-red-100 text-red-800' :
+                              pair.similarity >= 80 ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-green-100 text-green-800'
+                            }`}>
+                              {pair.similarity}%
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {pair.submission1.userName || pair.submission1.userId}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {pair.submission2.userName || pair.submission2.userId}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="px-2 py-1 rounded text-sm bg-red-100 text-red-800">
+                              Flagged
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <button
+                              onClick={() => setSelectedPair(pair)}
+                              className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
+                            >
+                              View Code
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {plagiarismStats && plagiarismStats.pairs && plagiarismStats.pairs.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  No suspicious pairs found above the threshold of {plagiarismThreshold}%
+                </div>
+              )}
+
+              {!plagiarismStats && (
+                <div className="text-center py-8 text-gray-500">
+                  Select an exam and click "Detect Plagiarism" to analyze submissions
+                </div>
+              )}
+            </div>
+
+            {/* Code Comparison Modal */}
+            {selectedPair && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-auto">
+                  <div className="p-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-xl font-bold">
+                        Code Comparison - {selectedPair.similarity}% Similar
+                      </h3>
+                      <button
+                        onClick={() => setSelectedPair(null)}
+                        className="text-gray-500 hover:text-gray-700"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <h4 className="font-medium mb-2 text-gray-700">
+                          {selectedPair.submission1.userName || selectedPair.submission1.userId}'s Code
+                        </h4>
+                        <pre className="bg-gray-50 p-4 rounded-lg text-sm overflow-auto max-h-[60vh]">
+                          <code>{selectedPair.submission1.code || 'No code available'}</code>
+                        </pre>
+                      </div>
+                      <div>
+                        <h4 className="font-medium mb-2 text-gray-700">
+                          {selectedPair.submission2.userName || selectedPair.submission2.userId}'s Code
+                        </h4>
+                        <pre className="bg-gray-50 p-4 rounded-lg text-sm overflow-auto max-h-[60vh]">
+                          <code>{selectedPair.submission2.code || 'No code available'}</code>
+                        </pre>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        onClick={() => setSelectedPair(null)}
+                        className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>

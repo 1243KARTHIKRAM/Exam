@@ -252,3 +252,35 @@ export async function deleteCodingQuestion(questionId, token) {
   });
   return res.json();
 }
+
+// ==================== PLAGIARISM DETECTION API ====================
+
+// Detect plagiarism for an exam's coding submissions
+export async function detectPlagiarism(examId, threshold = 80, questionId = null, token) {
+  const params = new URLSearchParams({ threshold: threshold.toString() });
+  if (questionId) params.append('questionId', questionId);
+  
+  const res = await fetch(`${API_URL}/api/admin/exam/${examId}/plagiarism?${params}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+// Get overall plagiarism statistics
+export async function getPlagiarismStats(examId = null, threshold = 80, token) {
+  const params = new URLSearchParams({ threshold: threshold.toString() });
+  if (examId) params.append('examId', examId);
+  
+  const res = await fetch(`${API_URL}/api/admin/plagiarism/stats?${params}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+// Compare two submissions
+export async function compareSubmissions(submissionId, otherSubmissionId, token) {
+  const res = await fetch(`${API_URL}/api/admin/submissions/${submissionId}/compare/${otherSubmissionId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
