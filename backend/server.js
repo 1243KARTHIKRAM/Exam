@@ -5,6 +5,8 @@ const connectDB = require('./config/db');
 const testRoute = require('./routes/test');
 const authRoute = require('./routes/auth');
 const examRoute = require('./routes/exams');
+const violationRoute = require('./routes/violations');
+const adminRoute = require('./routes/admin');
 const { addQuestion } = require('./controllers/questionController');
 const { protect, authorize } = require('./middleware/auth');
 
@@ -20,6 +22,8 @@ connectDB();
 // routes
 app.use('/api/auth', authRoute);
 app.use('/api/exams', examRoute);
+app.use('/api/violations', violationRoute);
+app.use('/api/admin', adminRoute);
 app.post('/api/questions/add', protect, authorize('admin'), addQuestion);
 app.use('/api/test', testRoute);
 

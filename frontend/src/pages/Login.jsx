@@ -33,7 +33,7 @@ export default function Login() {
     if (res.token) {
       localStorage.setItem('token', res.token);
       localStorage.setItem('role', res.user.role);
-      navigate(res.user.role === 'admin' ? '/dashboard' : '/dashboard');
+      navigate(res.user.role === 'admin' ? '/dashboard' : '/student-dashboard');
     } else {
       setError(res.message || 'Login failed');
     }

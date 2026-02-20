@@ -40,7 +40,7 @@ export default function Register() {
       localStorage.setItem('role', res.user.role);
       setSuccess('Registered successfully');
       // redirect based on role
-      navigate(res.user.role === 'admin' ? '/dashboard' : '/dashboard');
+      navigate(res.user.role === 'admin' ? '/dashboard' : '/student-dashboard');
     } else {
       setError(res.message || 'Registration failed');
     }

@@ -100,10 +100,20 @@ export default function Dashboard() {
   return (
     <div className="p-4">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-semibold mb-4">Dashboard</h2>
-        <button onClick={logout} className="bg-red-500 text-white py-2 px-4">
-          Logout
-        </button>
+        <h2 className="text-2xl font-semibold mb-4">Admin Dashboard</h2>
+        <div className="space-x-2">
+          {role === 'admin' && (
+            <button 
+              onClick={() => navigate('/admin-dashboard')}
+              className="bg-indigo-600 text-white py-2 px-4"
+            >
+              Monitoring Dashboard
+            </button>
+          )}
+          <button onClick={logout} className="bg-red-500 text-white py-2 px-4">
+            Logout
+          </button>
+        </div>
       </div>
       {message && <p className="mb-2">{message}</p>}
       {role === 'admin' && (
