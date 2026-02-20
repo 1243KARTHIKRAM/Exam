@@ -88,6 +88,14 @@ export async function submitViolation(examId, type, snapshot, token) {
   return res.json();
 }
 
+// Get violation count for current user in an exam
+export async function getViolationCount(examId, token) {
+  const res = await fetch(`${API_URL}/api/violations/count/${examId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
 // Submit coding violation (paste, tab switch, fullscreen exit, etc.)
 export async function submitCodingViolation(examId, type, metadata = {}, token) {
   const res = await fetch(`${API_URL}/api/violations`, {
@@ -206,6 +214,16 @@ export async function runCode(data, token) {
   return res.json();
 }
 
+// Execute code without a question (quick test)
+export async function executeCode(data, token) {
+  const res = await fetch(`${API_URL}/api/code/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
 // Submit code (run all test cases and save)
 export async function submitCode(data, token) {
   const res = await fetch(`${API_URL}/api/code/submit`, {
@@ -217,14 +235,7 @@ export async function submitCode(data, token) {
 }
 
 // Execute code (legacy - for backward compatibility)
-export async function executeCode(data, token) {
-  const res = await fetch(`${API_URL}/api/code/submit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(data)
-  });
-  return res.json();
-}
+// This function is kept for backward compatibility but points to submit
 
 // Get user's submissions for a question
 export async function getUserSubmissions(questionId, token) {

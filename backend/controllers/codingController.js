@@ -1,18 +1,36 @@
-const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { exec, spawn } = require('child_process');
+const os = require('os');
 const CodingQuestion = require('../models/CodingQuestion');
 const Submission = require('../models/Submission');
 
-// Judge0 API configuration
-const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'https://judge0-ce.p.rapidapi.com';
-const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY || '';
-const JUDGE0_HOST = process.env.JUDGE0_HOST || 'judge0-ce.p.rapidapi.com';
-
-// Language IDs for Judge0
-const LANGUAGE_IDS = {
-  javascript: 63,  // Node.js
-  python: 71,      // Python 3
-  java: 62,       // Java (OpenJDK)
-  cpp: 54          // C++ (GCC 9.2.0)
+// Language configuration for local execution
+const LOCAL_LANGUAGES = {
+  cpp: {
+    extension: 'temp.cpp',
+    compileCommand: 'g++ temp.cpp -o temp.exe',
+    runCommand: 'temp.exe',
+    compileFirst: true
+  },
+  java: {
+    extension: 'Main.java',
+    compileCommand: 'javac Main.java',
+    runCommand: 'java Main',
+    compileFirst: true
+  },
+  python: {
+    extension: 'temp.py',
+    compileCommand: null,
+    runCommand: 'python temp.py',
+    compileFirst: false
+  },
+  javascript: {
+    extension: 'temp.js',
+    compileCommand: null,
+    runCommand: 'node temp.js',
+    compileFirst: false
+  }
 };
 
 // Security: Allowed patterns to prevent malicious code execution
@@ -143,8 +161,7 @@ exports.runCode = async (req, res) => {
     }
     
     // Validate language
-    const languageId = LANGUAGE_IDS[language];
-    if (!languageId) {
+    if (!LOCAL_LANGUAGES[language]) {
       return res.status(400).json({ success: false, message: 'Unsupported language' });
     }
     
@@ -170,23 +187,30 @@ exports.runCode = async (req, res) => {
     // Execute code for each sample test case
     const results = [];
     let allPassed = true;
+    let errorOutput = '';
     
     for (const testCase of testCases) {
-      const result = await runOnJudge0(code, languageId, testCase.input, question.timeLimit);
+      const result = await runLocally(code, language, testCase.input);
+      
+      // Capture error if present
+      if (result.error) {
+        errorOutput += result.error;
+      }
       
       const testResult = {
         testCaseId: testCase._id,
         input: testCase.input,
         expectedOutput: testCase.expectedOutput,
-        actualOutput: result.stdout || '',
-        status: result.status.description,
-        executionTime: result.time ? parseFloat(result.time) * 1000 : 0,
-        memory: result.memory || 0
+        actualOutput: result.output || '',
+        stderr: result.error || '',
+        status: result.status,
+        executionTime: 0,
+        memory: 0
       };
       
       // Check if output matches
       const expected = testCase.expectedOutput.trim();
-      const actual = (result.stdout || '').trim();
+      const actual = (result.output || '').trim();
       
       if (expected !== actual) {
         allPassed = false;
@@ -202,6 +226,8 @@ exports.runCode = async (req, res) => {
       success: true,
       type: 'run',
       results,
+      stdout: results[0]?.actualOutput || '',
+      stderr: errorOutput,
       summary: {
         total: results.length,
         passed: results.filter(r => r.status === 'Accepted').length,
@@ -211,6 +237,45 @@ exports.runCode = async (req, res) => {
   } catch (error) {
     console.error('Error running code:', error);
     res.status(500).json({ success: false, message: 'Failed to run code' });
+  }
+};
+
+// Execute code without a question (quick test)
+exports.executeCode = async (req, res) => {
+  try {
+    const { code, language, input } = req.body;
+    
+    // Validate input
+    if (!code || !language) {
+      return res.status(400).json({ success: false, message: 'Missing required fields: code, language' });
+    }
+    
+    // Validate language
+    if (!LOCAL_LANGUAGES[language]) {
+      return res.status(400).json({ success: false, message: 'Unsupported language', supportedLanguages: Object.keys(LOCAL_LANGUAGES) });
+    }
+    
+    // Security check
+    const securityCheck = validateCode(code, language);
+    if (!securityCheck.valid) {
+      return res.status(403).json({ success: false, message: 'Code contains forbidden patterns', reason: securityCheck.reason });
+    }
+    
+    // Execute code
+    const result = await runLocally(code, language, input || '');
+    
+    res.status(200).json({
+      success: true,
+      type: 'execute',
+      output: result.output || '',
+      error: result.error || '',
+      status: result.status,
+      executionTime: 0,
+      memory: 0
+    });
+  } catch (error) {
+    console.error('Error executing code:', error);
+    res.status(500).json({ success: false, message: 'Failed to execute code', error: error.message });
   }
 };
 
@@ -226,8 +291,7 @@ exports.submitCode = async (req, res) => {
     }
     
     // Validate language
-    const languageId = LANGUAGE_IDS[language];
-    if (!languageId) {
+    if (!LOCAL_LANGUAGES[language]) {
       return res.status(400).json({ success: false, message: 'Unsupported language' });
     }
     
@@ -265,24 +329,31 @@ exports.submitCode = async (req, res) => {
     // Execute code for each test case
     const results = [];
     let allPassed = true;
+    let errorOutput = '';
     
     for (const testCase of testCases) {
-      const result = await runOnJudge0(code, languageId, testCase.input, question.timeLimit);
+      const result = await runLocally(code, language, testCase.input);
+      
+      // Capture error if present
+      if (result.error) {
+        errorOutput += result.error;
+      }
       
       const testResult = {
         testCaseId: testCase._id,
         input: testCase.input,
         expectedOutput: testCase.isHidden ? 'Hidden' : testCase.expectedOutput,
-        actualOutput: result.stdout || '',
-        status: result.status.description,
-        executionTime: result.time ? parseFloat(result.time) * 1000 : 0,
-        memory: result.memory || 0
+        actualOutput: result.output || '',
+        stderr: result.error || '',
+        status: result.status,
+        executionTime: 0,
+        memory: 0
       };
       
       // Check if output matches (skip for hidden test cases)
       if (!testCase.isHidden) {
         const expected = testCase.expectedOutput.trim();
-        const actual = (result.stdout || '').trim();
+        const actual = (result.output || '').trim();
         
         if (expected !== actual) {
           allPassed = false;
@@ -292,7 +363,7 @@ exports.submitCode = async (req, res) => {
         }
       } else {
         // For hidden test cases, we can't reveal if it passed or failed
-        testResult.status = result.status.description === 'Accepted' ? 'Accepted' : 'Failed';
+        testResult.status = result.status === 'ok' ? 'Accepted' : 'Failed';
         if (testResult.status === 'Failed') {
           allPassed = false;
         }
@@ -308,18 +379,14 @@ exports.submitCode = async (req, res) => {
     submission.executionTime = results.reduce((sum, r) => sum + r.executionTime, 0);
     await submission.save();
     
+    // Return API response in required format
     res.status(200).json({
       success: true,
-      type: 'submit',
-      submissionId: submission._id,
-      status: submission.status,
-      score: submission.score,
-      totalTests: results.length,
       results: results.map(r => ({
-        testCaseId: r.testCaseId,
-        status: r.status,
-        executionTime: r.executionTime,
-        memory: r.memory
+        input: r.input,
+        expected: r.expectedOutput,
+        output: r.actualOutput,
+        passed: r.status === 'Accepted'
       }))
     });
   } catch (error) {
@@ -328,43 +395,153 @@ exports.submitCode = async (req, res) => {
   }
 };
 
-// Helper function to run code on Judge0
-async function runOnJudge0(code, languageId, input, timeLimit) {
-  try {
-    // Create submission
-    const createResponse = await axios.post(
-      `${JUDGE0_API_URL}/submissions`,
-      {
-        source_code: code,
-        language_id: languageId,
-        stdin: input,
-        time_limit: timeLimit / 1000,
-        memory_limit: 128000,
-        wait: true
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-RapidAPI-Key': JUDGE0_API_KEY,
-          'X-RapidAPI-Host': JUDGE0_HOST
-        },
-        timeout: 30000
-      }
-    );
-    
-    return createResponse.data;
-  } catch (error) {
-    console.error('Judge0 API error:', error.response?.data || error.message);
+// Helper function to run code locally
+async function runLocally(code, language, stdin = '') {
+  const langConfig = LOCAL_LANGUAGES[language];
+  if (!langConfig) {
     return {
-      status: { description: 'Error' },
-      stdout: '',
-      time: 0,
-      memory: 0,
-      stderr: error.message
+      output: '',
+      error: `Unsupported language: ${language}`,
+      status: 'Error'
     };
+  }
+
+  // Create temp directory
+  const tempDir = path.join(os.tmpdir(), `code_exec_${Date.now()}`);
+  const codeFile = path.join(tempDir, langConfig.extension);
+
+  try {
+    // Create temp directory
+    fs.mkdirSync(tempDir, { recursive: true });
+
+    // Write code to file
+    fs.writeFileSync(codeFile, code, 'utf8');
+
+    let stdout = '';
+    let stderr = '';
+    let compileError = '';
+
+    // Compile if needed (for C++ and Java)
+    if (langConfig.compileFirst && langConfig.compileCommand) {
+      const compileResult = await executeCommand(langConfig.compileCommand, tempDir, '');
+      compileError = compileResult.error;
+      
+      if (compileError) {
+        // Clean up and return compilation error
+        cleanupTempFiles(tempDir, langConfig.extension);
+        return {
+          output: '',
+          error: compileError,
+          status: 'Compilation Error'
+        };
+      }
+    }
+
+    // Run the code
+    const runResult = await executeCommand(langConfig.runCommand, tempDir, stdin);
+    stdout = runResult.output;
+    stderr = runResult.error;
+
+    // Determine status
+    let status = 'ok';
+    if (stderr || compileError) {
+      status = 'Runtime Error';
+    }
+
+    return {
+      output: stdout,
+      error: stderr || compileError,
+      status
+    };
+  } catch (error) {
+    console.error('Local execution error:', error);
+    return {
+      output: '',
+      error: error.message || 'Failed to execute code locally',
+      status: 'Error'
+    };
+  } finally {
+    // Clean up temp files
+    cleanupTempFiles(tempDir, langConfig.extension);
   }
 }
 
+// Execute a command and return stdout/stderr
+function executeCommand(command, cwd, stdin) {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+
+    const isWindows = process.platform === 'win32';
+    const shell = isWindows ? 'cmd.exe' : '/bin/sh';
+    const shellFlag = isWindows ? '/c' : '-c';
+
+    const child = spawn(shell, [shellFlag, command], {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    // Send stdin if provided
+    if (stdin) {
+      child.stdin.write(stdin);
+    }
+    child.stdin.end();
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    // Timeout after 30 seconds
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      stderr += '\nExecution timed out (30 seconds)';
+    }, 30000);
+
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      resolve({ output: stdout, error: stderr, code });
+    });
+
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      resolve({ output: stdout, error: error.message, code: -1 });
+    });
+  });
+}
+
+// Clean up temp files
+function cleanupTempFiles(tempDir, codeFile) {
+  try {
+    if (fs.existsSync(tempDir)) {
+      // Delete code file
+      const codePath = path.join(tempDir, codeFile);
+      if (fs.existsSync(codePath)) {
+        fs.unlinkSync(codePath);
+      }
+      
+      // Delete executable (for C++)
+      const exePath = path.join(tempDir, 'temp.exe');
+      if (fs.existsSync(exePath)) {
+        fs.unlinkSync(exePath);
+      }
+      
+      // Delete class files (for Java)
+      const classPath = path.join(tempDir, 'Main.class');
+      if (fs.existsSync(classPath)) {
+        fs.unlinkSync(classPath);
+      }
+      
+      // Remove temp directory
+      fs.rmdirSync(tempDir);
+    }
+  } catch (error) {
+    console.error('Cleanup error:', error);
+  }
+}
 // Get user's submissions for a question
 exports.getUserSubmissions = async (req, res) => {
   try {

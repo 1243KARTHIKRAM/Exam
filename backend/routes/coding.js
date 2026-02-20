@@ -6,6 +6,7 @@ const {
   getCodingQuestions,
   getCodingQuestion,
   runCode,
+  executeCode,
   submitCode,
   getUserSubmissions,
   getAllSubmissions,
@@ -13,14 +14,17 @@ const {
   deleteCodingQuestion
 } = require('../controllers/codingController');
 
+// Student routes - execute code without a question (quick test)
+router.post('/execute', protect, executeCode);
+
 // Student routes - run code (test with sample test cases only)
 router.post('/run', protect, runCode);
 
 // Student routes - submit code (run all test cases)
 router.post('/submit', protect, submitCode);
 
-// Legacy endpoint - execute code (for backward compatibility)
-router.post('/execute', protect, submitCode);
+// Legacy endpoint - for backward compatibility
+router.post('/legacy', protect, submitCode);
 
 // Get user's submissions
 router.get('/submissions/:questionId', protect, getUserSubmissions);

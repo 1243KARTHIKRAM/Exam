@@ -44,9 +44,13 @@ exports.createViolation = async (req, res) => {
 
     await violation.save();
 
+    // Get total violation count for this user in this exam
+    const violationCount = await Violation.countDocuments({ userId, examId });
+
     res.status(201).json({
       success: true,
-      violation
+      violation,
+      violationCount
     });
   } catch (error) {
     console.error('Error creating violation:', error);
@@ -96,6 +100,27 @@ exports.getUserViolations = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch user violations'
+    });
+  }
+};
+
+// Get violation count for a user in an exam
+exports.getViolationCount = async (req, res) => {
+  try {
+    const { examId } = req.params;
+    const userId = req.user.id;
+
+    const count = await Violation.countDocuments({ userId, examId });
+
+    res.status(200).json({
+      success: true,
+      violationCount: count
+    });
+  } catch (error) {
+    console.error('Error fetching violation count:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch violation count'
     });
   }
 };

@@ -1,5 +1,6 @@
 const Exam = require('../models/Exam');
 const Question = require('../models/Question');
+const CodingQuestion = require('../models/CodingQuestion');
 const Answer = require('../models/Answer');
 
 // POST /api/exams/create
@@ -15,14 +16,11 @@ const createExam = async (req, res) => {
   }
 };
 
-// GET /api/exams/available - Get available exams for students (visible based on date/time)
+// GET /api/exams/available - Get available exams for students (all exams, not just started ones)
 const getAvailableExams = async (req, res) => {
   try {
-    const now = new Date();
-    // Only show exams where the exam date/time has started (not in the future)
-    const exams = await Exam.find({
-      date: { $lte: now }  // Exam date must be less than or equal to current time
-    }).populate('createdBy', 'name email');
+    // Show all exams - students can see both upcoming and past exams
+    const exams = await Exam.find({}).populate('createdBy', 'name email');
     
     res.json(exams);
   } catch (err) {
@@ -48,8 +46,17 @@ const getExamById = async (req, res) => {
     const exam = await Exam.findById(req.params.id);
     if (!exam) return res.status(404).json({ message: 'Exam not found' });
     
-    const questions = await Question.find({ examId: req.params.id });
-    res.json({ exam, questions });
+    // Fetch MCQ questions from Question collection
+    const mcqQuestions = await Question.find({ examId: req.params.id });
+    
+    // Fetch coding questions from CodingQuestion collection
+    const codingQuestions = await CodingQuestion.find({ examId: req.params.id });
+    
+    res.json({ 
+      exam, 
+      mcqQuestions,
+      codingQuestions
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

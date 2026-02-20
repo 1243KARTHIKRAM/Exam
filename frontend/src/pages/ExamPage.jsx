@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
-import { getExamById, submitExamAnswers, submitViolation, submitCodingViolation, getCodingQuestions, runCode, submitCode } from '../utils/api';
+import { getExamById, submitExamAnswers, submitViolation, submitCodingViolation, runCode, submitCode, getViolationCount } from '../utils/api';
 import CodingEditor from '../components/CodingEditor';
+import WarningPopup from '../components/WarningPopup';
 
 import '@mediapipe/face_detection';
 import '@mediapipe/camera_utils';
@@ -28,6 +29,7 @@ export default function ExamPage() {
   const [codeOutput, setCodeOutput] = useState('');
   const [testResults, setTestResults] = useState([]);
   const [allQuestions, setAllQuestions] = useState([]);
+  const [violationThreshold] = useState(5); // Auto-submit after 5 violations
 
   const [proctoringEnabled, setProctoringEnabled] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
@@ -163,7 +165,7 @@ export default function ExamPage() {
     });
     faceDetection.setOptions({
       model: 'short',
-      minDetectionConfidence: 0.5
+      minDetectionConfidence: 0.3
     });
     faceDetection.onResults(handleFaceDetectionResults);
     faceDetectorRef.current = faceDetection;
@@ -175,33 +177,68 @@ export default function ExamPage() {
     const now = Date.now();
     if (now - lastViolationTimeRef.current < 3000) return;
 
-    const numFaces = results.detections ? results.detections.length : 0;
+    const faceCount = results.detections?.length || 0;
+    console.log("Faces detected:", faceCount);
 
-    if (numFaces === 0) {
+    if (faceCount === 0) {
       await handleViolation('no_face', 'No face detected! Please stay in front of the camera.');
-    } else if (numFaces > 1) {
-      await handleViolation('multiple_faces', `${numFaces} faces detected! Only one person should be in front of the camera.`);
+    } else if (faceCount > 1) {
+      await handleViolation('multiple_faces', `${faceCount} faces detected! Only one person should be in front of the camera.`);
     }
   }, [submitted, proctoringEnabled]);
 
   const handleViolation = async (type, message) => {
+    if (submitted) return;
+    
     lastViolationTimeRef.current = Date.now();
-    setViolationCount(prev => prev + 1);
     setWarningMessage(message);
     setShowWarning(true);
 
     const snapshot = captureSnapshot();
 
     try {
-      await submitViolation(id, type, snapshot, token);
+      const response = await submitViolation(id, type, snapshot, token);
+      
+      if (response.success) {
+        const newCount = response.violationCount || violationCount + 1;
+        setViolationCount(newCount);
+        
+        // Check if threshold exceeded - auto submit
+        if (newCount >= violationThreshold) {
+          await autoSubmitExam();
+          return;
+        }
+      }
     } catch (err) {
       console.error('Failed to submit violation:', err);
+      // Still increment count locally as fallback
+      setViolationCount(prev => prev + 1);
     }
 
     setTimeout(() => {
       warningDismissTimeRef.current = Date.now();
       setShowWarning(false);
     }, 5000);
+  };
+
+  const autoSubmitExam = async () => {
+    try {
+      setError('Maximum violations exceeded! Auto-submitting exam...');
+      setShowWarning(false);
+      
+      // Submit all answers
+      await submitExamAnswers(id, answers, token);
+      setSubmitted(true);
+      
+      // Navigate to results or show success
+      setTimeout(() => {
+        alert('Exam submitted automatically due to excessive violations.');
+        navigate('/dashboard');
+      }, 1000);
+    } catch (err) {
+      console.error('Auto-submit failed:', err);
+      setError('Failed to auto-submit. Please contact the administrator.');
+    }
   };
 
   const captureSnapshot = () => {
@@ -255,6 +292,12 @@ export default function ExamPage() {
       return;
     }
 
+    // Ensure video is ready and has valid dimensions
+    if (videoRef.current.readyState !== 4 || videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+      requestAnimationFrame(processFrame);
+      return;
+    }
+
     try {
       await faceDetectorRef.current.send({ image: videoRef.current });
     } catch (err) {
@@ -303,15 +346,45 @@ export default function ExamPage() {
       const data = await getExamById(id, token);
       if (data.exam) {
         setExam(data.exam);
-        setQuestions(data.questions || []);
-        setAllQuestions([...(data.questions || [])]);
+        
+        // Process MCQ questions - add questionType
+        const mcqQuestions = (data.mcqQuestions || []).map(q => ({
+          ...q,
+          questionType: 'mcq'
+        }));
+        
+        // Process coding questions - add questionType
+        const codingQuestionsData = (data.codingQuestions || []).map(q => ({
+          ...q,
+          questionType: 'coding'
+        }));
+        
+        setQuestions(mcqQuestions);
+        setCodingQuestions(codingQuestionsData);
+        
+        // Combine all questions
+        const allQ = [...mcqQuestions, ...codingQuestionsData];
+        setAllQuestions(allQ);
         setTimeLeft(data.exam.duration * 60);
         
-        // Also load coding questions if any
-        const codingData = await getCodingQuestions(id, token);
-        if (codingData.success && codingData.questions) {
-          setCodingQuestions(codingData.questions);
-          setAllQuestions(prev => [...prev, ...codingData.questions]);
+        // Initialize first question if it's a coding question
+        if (allQ.length > 0 && allQ[0].questionType === 'coding') {
+          setCurrentCodingQuestion(allQ[0]);
+        }
+        
+        // Load existing violation count
+        try {
+          const violationData = await getViolationCount(id, token);
+          if (violationData.success) {
+            setViolationCount(violationData.violationCount);
+            
+            // Check if already exceeded threshold
+            if (violationData.violationCount >= violationThreshold) {
+              await autoSubmitExam();
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch violation count:', err);
         }
       } else {
         setError(data.message || 'Exam not found');
@@ -346,12 +419,24 @@ export default function ExamPage() {
       
       if (result.success) {
         setTestResults(result.results || []);
-        setCodeOutput(result.results?.[0]?.actualOutput || '');
+        
+        // Build output string with stdout and stderr
+        let output = '';
+        if (result.stdout) {
+          output += result.stdout;
+        }
+        if (result.stderr) {
+          output += (output ? '\n' : '') + 'Error: ' + result.stderr;
+        }
+        if (!output && result.results && result.results.length > 0) {
+          output = result.results[0]?.actualOutput || '';
+        }
+        setCodeOutput(output);
       } else {
         setCodeOutput(result.message || 'Error running code');
       }
     } catch (err) {
-      setCodeOutput('Failed to execute code');
+      setCodeOutput('Failed to execute code: ' + (err.message || 'Unknown error'));
     } finally {
       setIsRunning(false);
     }
@@ -376,13 +461,27 @@ export default function ExamPage() {
       
       if (result.success) {
         setTestResults(result.results || []);
+        
+        // Build output with stdout and stderr
+        let output = '';
+        if (result.results) {
+          result.results.forEach((r, idx) => {
+            if (r.actualOutput) {
+              output += (output ? '\n' : '') + `Test ${idx + 1}: ${r.actualOutput}`;
+            }
+            if (r.stderr) {
+              output += (output ? '\n' : '') + `Error: ${r.stderr}`;
+            }
+          });
+        }
+        
         // Mark as answered
         setAnswers({ ...answers, [currentCodingQuestion._id]: { submitted: true, score: result.score } });
       } else {
         setCodeOutput(result.message || 'Error submitting code');
       }
     } catch (err) {
-      setCodeOutput('Failed to submit code');
+      setCodeOutput('Failed to submit code: ' + (err.message || 'Unknown error'));
     } finally {
       setIsSubmittingCode(false);
     }
@@ -423,13 +522,14 @@ export default function ExamPage() {
       }
     } catch (err) {
       let correct = 0;
-      questions.forEach((q) => {
-        if (answers[q._id] === q.correctAnswer) {
+      allQuestions.forEach((q) => {
+        if (q.questionType === 'mcq' && answers[q._id] === q.correctAnswer) {
           correct++;
         }
       });
-      const score = Math.round((correct / questions.length) * 100);
-      setError(`Exam submitted! Your score: ${score}% (${correct}/${questions.length} correct)`);
+      const mcqOnly = allQuestions.filter(q => q.questionType === 'mcq');
+      const score = Math.round((correct / mcqOnly.length) * 100);
+      setError(`Exam submitted! Your score: ${score}% (${correct}/${mcqOnly.length} correct)`);
     }
   };
 
@@ -468,7 +568,7 @@ export default function ExamPage() {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
       // Check if it's a coding question
       const question = allQuestions[currentQuestionIndex + 1];
-      if (question && question.title) {
+      if (question && question.questionType === 'coding') {
         setCurrentCodingQuestion(question);
       } else {
         setCurrentCodingQuestion(null);
@@ -481,7 +581,7 @@ export default function ExamPage() {
       setCurrentQuestionIndex(currentQuestionIndex - 1);
       // Check if it's a coding question
       const question = allQuestions[currentQuestionIndex - 1];
-      if (question && question.title) {
+      if (question && question.questionType === 'coding') {
         setCurrentCodingQuestion(question);
       } else {
         setCurrentCodingQuestion(null);
@@ -493,14 +593,15 @@ export default function ExamPage() {
     setCurrentQuestionIndex(index);
     // Check if it's a coding question
     const question = allQuestions[index];
-    if (question && question.title) {
+    if (question && question.questionType === 'coding') {
       setCurrentCodingQuestion(question);
     } else {
       setCurrentCodingQuestion(null);
     }
   };
 
-  const currentQuestion = questions[currentQuestionIndex];
+  const currentQuestion = allQuestions[currentQuestionIndex];
+  const isCurrentQuestionCoding = currentQuestion?.questionType === 'coding';
   const answeredCount = Object.keys(answers).length;
 
   const getTimeColor = () => {
@@ -553,33 +654,17 @@ export default function ExamPage() {
       <video ref={videoRef} style={{ display: 'none' }} playsInline muted />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {showWarning && (
-        <div className="fixed top-0 left-0 right-0 z-50 animate-slide-in">
-          <div className="bg-gradient-to-r from-red-500 to-red-600 text-white py-4 px-4 shadow-lg animate-pulse">
-            <div className="max-w-7xl mx-auto flex items-center justify-between">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 mr-4">
-                  <svg className="h-8 w-8 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="font-semibold text-lg">{warningMessage}</p>
-                  <p className="text-sm text-red-100">Violation #{violationCount} recorded</p>
-                </div>
-              </div>
-              <button 
-                onClick={dismissWarning}
-                className="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
-              >
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Warning Popup Component */}
+      <WarningPopup
+        show={showWarning}
+        message={warningMessage}
+        violationCount={violationCount}
+        maxViolations={violationThreshold}
+        onDismiss={() => {
+          warningDismissTimeRef.current = Date.now();
+          setShowWarning(false);
+        }}
+      />
 
       {!isFullscreen && !submitted && (
         <div className={`fixed bottom-4 right-4 z-40 animate-scale-in ${isDark ? 'bg-yellow-900' : 'bg-yellow-500'} text-white py-4 px-5 rounded-xl shadow-xl max-w-sm`}>
@@ -677,6 +762,26 @@ export default function ExamPage() {
                 {formatTime(timeLeft)}
               </p>
             </div>
+            
+            {/* Violation Counter Badge */}
+            {violationCount > 0 && (
+              <div className={`mt-3 p-3 rounded-xl text-center ${
+                violationCount >= violationThreshold 
+                  ? 'bg-red-600 animate-pulse' 
+                  : violationCount >= violationThreshold - 2
+                    ? 'bg-orange-500'
+                    : 'bg-yellow-500/80'
+              }`}>
+                <div className="flex items-center justify-center gap-2">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <span className="font-bold text-white">
+                    {violationCount}/{violationThreshold} Violations
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 p-4 overflow-y-auto">
@@ -685,12 +790,12 @@ export default function ExamPage() {
               {allQuestions.map((q, idx) => {
                 const isAnswered = answers[q._id];
                 const isCurrent = idx === currentQuestionIndex;
-                const isCoding = !!q.title;
+                const isCoding = q.questionType === 'coding';
                 return (
                   <button
                     key={idx}
                     onClick={() => goToQuestion(idx)}
-                    className={`w-10 h-10 rounded-lg text-sm font-medium transition-all ${
+                    className={`w-10 h-10 rounded-lg text-sm font-medium transition-all relative ${
                       isCurrent
                         ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/30'
                         : isAnswered
@@ -703,6 +808,9 @@ export default function ExamPage() {
                     }`}
                   >
                     {idx + 1}
+                    {isCoding && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+                    )}
                   </button>
                 );
               })}
@@ -733,15 +841,22 @@ export default function ExamPage() {
           </header>
 
           <div className="flex-1 overflow-y-auto p-6">
-            {currentQuestion && (
+            {currentQuestion && !isCurrentQuestionCoding && (
               <div className={`max-w-3xl mx-auto ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl border ${isDark ? 'border-slate-700' : 'border-gray-200'} shadow-xl p-8`}>
                 <div className="flex items-start space-x-4 mb-6">
                   <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white font-bold">
                     {currentQuestionIndex + 1}
                   </div>
-                  <h2 className={`text-xl font-semibold flex-1 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {currentQuestion.questionText}
-                  </h2>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-400">
+                        MCQ
+                      </span>
+                    </div>
+                    <h2 className={`text-xl font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                      {currentQuestion.questionText}
+                    </h2>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -783,17 +898,17 @@ export default function ExamPage() {
             )}
             
             {/* Render Coding Question */}
-            {currentCodingQuestion && (
+            {currentQuestion && isCurrentQuestionCoding && (
               <div className="h-full">
                 <CodingEditor
-                  question={currentCodingQuestion}
+                  question={currentQuestion}
                   onRun={handleRunCode}
                   onSubmit={handleSubmitCode}
                   isRunning={isRunning}
                   isSubmitting={isSubmittingCode}
                   output={codeOutput}
                   testResults={testResults}
-                  examId={currentExam?._id}
+                  examId={exam?._id}
                   token={token}
                   onViolation={handleCodingViolation}
                 />
@@ -838,7 +953,7 @@ export default function ExamPage() {
               onClick={goToNextQuestion}
               disabled={currentQuestionIndex === allQuestions.length - 1}
               className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
-                currentQuestionIndex === questions.length - 1
+                currentQuestionIndex === allQuestions.length - 1
                   ? 'opacity-50 cursor-not-allowed'
                   : 'bg-primary-500 text-white hover:bg-primary-600'
               }`}

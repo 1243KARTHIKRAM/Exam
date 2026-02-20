@@ -301,7 +301,7 @@ const CodingEditor = ({
       <div className="flex border-b border-gray-200 dark:border-gray-700">
         <button
           onClick={() => setActiveTab('description')}
-          className py-2 font={`px-4-medium ${
+          className={`py-2 px-4 font-medium ${
             activeTab === 'description'
               ? 'border-b-2 border-blue-600 text-blue-600'
               : 'text-gray-600 dark:text-gray-400'
@@ -415,6 +415,12 @@ const CodingEditor = ({
                         <span className="text-gray-600 dark:text-gray-400">Output:</span>
                         <pre className="ml-2 text-gray-800 dark:text-gray-200">{result.actualOutput || '(no output)'}</pre>
                       </div>
+                      {result.stderr && (
+                        <div>
+                          <span className="text-red-600 dark:text-red-400">Error:</span>
+                          <pre className="ml-2 text-red-800 dark:text-red-200">{result.stderr}</pre>
+                        </div>
+                      )}
                       {result.executionTime > 0 && (
                         <div>
                           <span className="text-gray-600 dark:text-gray-400">Time:</span>
@@ -428,7 +434,7 @@ const CodingEditor = ({
             ) : output ? (
               <div>
                 <h5 className="font-medium mb-2 text-gray-800 dark:text-gray-200">Console Output</h5>
-                <pre className="p-3 bg-gray-900 text-green-400 rounded-md text-sm overflow-x-auto">
+                <pre className={`p-3 rounded-md text-sm overflow-x-auto ${output.includes('Error:') || output.includes('error') ? 'bg-red-900 text-red-300' : 'bg-gray-900 text-green-400'}`}>
                   {output}
                 </pre>
               </div>
